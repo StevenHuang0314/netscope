@@ -23,6 +23,15 @@ services:
       - ./backend:/app
     environment:
       DATABASE_URL: postgresql+psycopg://netscope:netscope@db:5432/netscope
+      # Background collector. Set INGEST_ENABLED=false to run the API without it
+      # (and keep it false if you ever scale this service past one replica).
+      INGEST_ENABLED: "true"
+      INGEST_INTERVAL_SECONDS: "15"
+      INGEST_SOURCE: synthetic
+      # The simulated household's wall clock. The container runs in UTC;
+      # without this the daily traffic curve is shifted by your UTC offset.
+      NETSCOPE_TIMEZONE: America/Chicago
+      LOG_LEVEL: INFO
     depends_on:
       db:
         condition: service_healthy

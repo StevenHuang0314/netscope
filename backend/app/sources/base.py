@@ -15,7 +15,10 @@ class FlowRecord:
     bytes: int
     packets: int
     ts: datetime
+    # Identity of the device that emitted the flow, when the source knows it.
+    # A router API or DHCP lease table supplies these; a bare pcap may not.
     src_mac: str | None = None
+    src_hostname: str | None = None
 
 
 class DataSource(ABC):

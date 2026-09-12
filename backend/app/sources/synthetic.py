@@ -1,7 +1,13 @@
+import logging
+import math
 import random
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app import config
 from app.sources.base import DataSource, FlowRecord
+
+log = logging.getLogger(__name__)
 
 # A plausible home network: mixed device types with different traffic profiles.
 DEVICES = [
@@ -45,8 +51,46 @@ PROFILE_RATE = {
 }
 
 
+def _local_zone() -> ZoneInfo | timezone:
+    """The household's wall clock — NOT the server's.
+
+    The diurnal curve below describes when people are home and awake, which is a
+    fact about local time. Containers run in UTC, so reading the UTC hour makes
+    the simulation think a Chicago evening is the middle of the night.
+    """
+    try:
+        return ZoneInfo(config.LOCAL_TIMEZONE)
+    except (ZoneInfoNotFoundError, ValueError):
+        log.warning(
+            "unknown NETSCOPE_TIMEZONE %r; falling back to UTC",
+            config.LOCAL_TIMEZONE,
+        )
+        return timezone.utc
+
+
+def _poisson(lam: float) -> int:
+    """Draw a flow count for one device in one poll (Knuth's algorithm).
+
+    Flow arrivals are a counting process, so Poisson is the right shape. The
+    obvious-looking `int(random.gauss(mu, sigma))` is not: int() truncates
+    toward zero, so any rate below 1.0 collapses to almost always zero — a
+    device expected to emit 0.6 flows emits one about 5% of the time instead of
+    ~55% — and even busy devices lose ~20% of their traffic to the floor.
+    """
+    if lam <= 0:
+        return 0
+    target = math.exp(-lam)
+    k = 0
+    p = 1.0
+    while True:
+        p *= random.random()
+        if p <= target:
+            return k
+        k += 1
+
+
 def _diurnal_multiplier(hour: int) -> float:
-    """Traffic is low overnight, peaks in the evening."""
+    """Traffic is low overnight, peaks in the evening. `hour` is LOCAL."""
     if 0 <= hour < 6:
         return 0.15
     if 6 <= hour < 9:
@@ -72,14 +116,18 @@ def _pick_destination() -> tuple[str, int, str, tuple[int, int] | None]:
 class SyntheticSource(DataSource):
     """Generates plausible home-network traffic. Used when no real capture is available."""
 
+    def __init__(self) -> None:
+        self._zone = _local_zone()
+
     def poll(self) -> list[FlowRecord]:
+        # Flows are stamped in UTC; only the activity curve is read in local time.
         now = datetime.now(timezone.utc)
-        multiplier = _diurnal_multiplier(now.hour)
+        multiplier = _diurnal_multiplier(now.astimezone(self._zone).hour)
         flows: list[FlowRecord] = []
 
-        for mac, ip, _hostname, profile in DEVICES:
+        for mac, ip, hostname, profile in DEVICES:
             expected = PROFILE_RATE[profile] * multiplier
-            count = max(0, int(random.gauss(expected, expected * 0.4)))
+            count = _poisson(expected)
 
             for _ in range(count):
                 dst_ip, dst_port, protocol, byte_range = _pick_destination()
@@ -96,6 +144,7 @@ class SyntheticSource(DataSource):
                         packets=max(1, size // 1400),
                         ts=now,
                         src_mac=mac,
+                        src_hostname=hostname,
                     )
                 )
 
