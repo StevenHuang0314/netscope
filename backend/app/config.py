@@ -41,3 +41,14 @@ LOCAL_TIMEZONE: str = os.environ.get("NETSCOPE_TIMEZONE", "America/Chicago").str
 # Uvicorn configures its own loggers but leaves the root logger bare, so app
 # log records go nowhere unless we attach a handler ourselves.
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+
+# Browser origins allowed to call this API. The Vite dev server runs on 5173 and
+# is a different origin from the API on 8000, so without this every fetch from
+# the React app fails CORS preflight.
+CORS_ORIGINS: list[str] = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if origin.strip()
+]

@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
+from app.routers import devices, traffic
 from app.scheduler import IngestScheduler
 from app.sources.base import DataSource
 from app.sources.synthetic import SyntheticSource
@@ -45,6 +47,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="NetScope API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+app.include_router(devices.router)
+app.include_router(traffic.router)
 
 
 @app.get("/api/health")
